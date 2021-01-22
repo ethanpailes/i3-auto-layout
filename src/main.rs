@@ -3,14 +3,30 @@ use tokio::{stream::StreamExt, sync::mpsc};
 use tokio_i3ipc::{
     event::{Event, Subscribe, WindowChange},
     msg::Msg,
-    reply::{Node, NodeLayout, Rect},
+    reply::{Node, NodeLayout},
     I3,
 };
 
-#[rustfmt::skip]
-fn split_rect(r: Rect) -> &'static str {
-    if r.width > r.height { "split h" }
-    else { "split v" }
+fn split(n: &Node) -> &'static str {
+    if n.name == Some("Alacritty".to_string()) || n.name == Some("xterm".to_string()) {
+        // right stack split if we are dealing with a termial
+        // TODO(ethan): this doesn't handle splitting the left window
+        //              correctly after the first time. I really want
+        //              it to add a new window to the stack on the
+        //              right.
+        if n.rect.x == 0 {
+            "split h"
+        } else {
+            "split v"
+        }
+    } else {
+        // spiral split if we are not dealing with a termial
+        if n.window_rect.width > n.window_rect.height {
+            "split h"
+        } else {
+            "split v"
+        }
+    }
 }
 
 // walk the tree and determine if `window_id` has tabbed parent
@@ -49,15 +65,15 @@ async fn main() -> Result<()> {
                     NodeLayout::Tabbed | NodeLayout::Stacked
                 );
 
+                let root = i3.get_tree().await?;
                 let (name, tabbed_parent) = (
-                    window_data.container.name,
-                    has_tabbed_parent(&i3.get_tree().await?, window_data.container.id, is_tabbed),
+                    &window_data.container.name,
+                    has_tabbed_parent(&root, window_data.container.id, is_tabbed),
                 );
-                log::debug!("name={:?}, tabbed_parent={}", &name, tabbed_parent);
+                log::debug!("name={:?}, tabbed_parent={}", name, tabbed_parent);
 
                 if !tabbed_parent {
-                    send.send(split_rect(window_data.container.window_rect))
-                        .await?;
+                    send.send(split(&window_data.container)).await?;
                 }
             }
         }
